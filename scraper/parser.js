@@ -1,71 +1,35 @@
-// ============================================================================
-// parser.js — Bright Data Scraper Studio (Parser code)
-// Owner: Swapnil
-//
-// PURPOSE:
-//   Extract Perplexity's answer text and citation URLs from the rendered DOM.
-//   This runs AFTER interaction.js has navigated to the answer page.
-//
-// ENVIRONMENT:
-//   - Cheerio ($) is pre-loaded — use it like jQuery to select DOM elements.
-//   - Return a plain object; interaction.js calls collect() on the result.
-//
-// OUTPUT SHAPE (consumed by interaction.js → collect() → Kartik's backend):
-//   {
-//     answer_text: string,   // full answer text
-//     citations: string[]    // array of source/citation URLs
-//   }
-// ============================================================================
+// Bright Data Scraper Studio - Parser Code
+// Expected to run after interaction.js completes
 
-// --- Extract answer text ---
-// Perplexity renders its answer inside a container with class "prose".
-// There may be multiple .prose elements on the page (e.g. if there are
-// related questions), but the first one is the primary answer.
-// We grab its full text content, trimmed of whitespace.
-const answerEl = $('.prose').first();
-const answer_text = answerEl.text().trim();
+// Note: Selectors may need to be adjusted based on Perplexity's current DOM.
+// Use Bright Data's Self-Healing tool if these break.
 
-// --- Extract citation URLs ---
-// Perplexity shows source citations in two places:
-//   1. A "Sources" section above the answer with cards/chips linking to sources.
-//   2. Inline numbered superscript references within the answer text.
-//
-// Strategy: collect all anchor hrefs that point to external domains from within
-// the answer thread area, filtering out Perplexity's own internal links
-// (navigation, auth, etc.) and deduplicating.
-const citationSet = new Set();
+// 1. Extract the main answer text.
+// Perplexity usually places the main answer inside a div with specific prose classes.
+// Here we target the primary container that holds the generated answer.
+let answer_text = $('div.prose, div[dir="auto"]').text().trim();
 
-// Approach A: Source cards/chips — typically rendered as anchor tags with
-// data-testid or within a sources container. Look for links in the area
-// preceding the .prose answer that link to external sites.
-$('a[href]').each((i, el) => {
-    const href = $(el).attr('href');
-    if (!href) return;
+// 2. Extract citation URLs.
+// Citations are usually rendered as links with superscript numbers, or in a specific "Sources" block.
+// We look for all external links that look like sources.
+let citations = [];
 
-    // Skip Perplexity internal links
-    if (href.startsWith('/') || href.startsWith('#')) return;
-    if (href.includes('perplexity.ai')) return;
-
-    // Skip javascript: and mailto: links
-    if (href.startsWith('javascript:') || href.startsWith('mailto:')) return;
-
-    // Skip social/auth links
-    if (href.includes('google.com/accounts') || href.includes('apple.com')) return;
-
-    // Accept external URLs as citation candidates
-    try {
-        const url = new URL(href);
-        if (url.protocol === 'http:' || url.protocol === 'https:') {
-            citationSet.add(href);
+// Method A: Look for the source pill links at the top of the answer
+$('a[href^="http"]').each((i, el) => {
+    let url = $(el).attr('href');
+    
+    // Filter out internal perplexity links or irrelevant links
+    if (url && !url.includes('perplexity.ai') && !url.includes('twitter.com/intent')) {
+        // Ensure no duplicates
+        if (!citations.includes(url)) {
+            citations.push(url);
         }
-    } catch (e) {
-        // Malformed URL — skip
     }
 });
 
-const citations = Array.from(citationSet);
-
-return {
+// Final output payload
+return collect({
+    country: input.country || "us",
     answer_text: answer_text,
     citations: citations
-};
+});

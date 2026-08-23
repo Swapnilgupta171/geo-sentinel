@@ -1,29 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-export interface BrandAnalysisData {
-  brand: string;
-  queryTime: string;
-  us: {
-    country: string;
-    code: string;
-    model: string;
-    sentiment: number;
-    visibility: boolean;
-    narrative: string;
-    sources: string[];
-  };
-  de: {
-    country: string;
-    code: string;
-    model: string;
-    sentiment: number;
-    visibility: boolean;
-    narrative: string;
-    sources: string[];
-  };
-}
+import { useEffect } from "react";
+import type { QueryResult } from "@/shared/types";
 
 interface ResultsDrawerProps {
   isOpen: boolean;
@@ -31,6 +9,7 @@ interface ResultsDrawerProps {
   brand: string;
   isLoading: boolean;
   loadingStep: string;
+  apiResults?: QueryResult | null;
 }
 
 export function ResultsDrawer({
@@ -39,6 +18,7 @@ export function ResultsDrawer({
   brand,
   isLoading,
   loadingStep,
+  apiResults,
 }: ResultsDrawerProps) {
   // Close on Escape key
   useEffect(() => {
@@ -63,55 +43,74 @@ export function ResultsDrawer({
     };
   }, [isOpen]);
 
-  // Generate realistic contextual data based on brand
   const displayBrand = brand.trim() || "Meridian Motors";
-  
+
+  // Check if we have real API results from the backend
+  const hasRealResults = apiResults && apiResults.status === "ready" && apiResults.results.length === 2;
+
+  const usResult = hasRealResults ? apiResults.results.find((r) => r.country === "us") : null;
+  const deResult = hasRealResults ? apiResults.results.find((r) => r.country === "de") : null;
+
+  // Fallback realistic mock generator
   const isDefaultMeridian = displayBrand.toLowerCase().includes("meridian");
-  
-  const usSentiment = isDefaultMeridian ? "+0.72" : "+0.68";
-  const deSentiment = isDefaultMeridian ? "+0.18" : "+0.24";
 
-  const usNarrative = isDefaultMeridian
+  const usSentiment = usResult
+    ? (usResult.sentiment >= 0 ? `+${usResult.sentiment.toFixed(2)}` : usResult.sentiment.toFixed(2))
+    : isDefaultMeridian
+      ? "+0.72"
+      : "+0.68";
+
+  const deSentiment = deResult
+    ? (deResult.sentiment >= 0 ? `+${deResult.sentiment.toFixed(2)}` : deResult.sentiment.toFixed(2))
+    : isDefaultMeridian
+      ? "+0.18"
+      : "+0.24";
+
+  const usNarrative = usResult?.narrativeSummary || (isDefaultMeridian
     ? `${displayBrand} is recognized as a leader in sustainable automotive innovation, with strong consumer trust scores and expanding market share in the mid-range EV segment. Coverage emphasizes competitive pricing and charging infrastructure partnerships.`
-    : `${displayBrand} is described in US media and analyst reports as an agile market innovator with strong growth velocity. US queries emphasize product feature momentum, recent funding/expansion milestones, and high consumer satisfaction.`;
+    : `${displayBrand} is described in US media and analyst reports as an agile market innovator with strong growth velocity. US queries emphasize product feature momentum, recent funding/expansion milestones, and high consumer satisfaction.`);
 
-  const deNarrative = isDefaultMeridian
+  const deNarrative = deResult?.narrativeSummary || (isDefaultMeridian
     ? `${displayBrand} wird als aufstrebender Wettbewerber im europäischen E-Fahrzeugmarkt beschrieben, der jedoch hinter etablierten deutschen Herstellern zurückbleibt. Bedenken hinsichtlich der Verarbeitungsqualität und des Kundendienstnetzes werden häufig angeführt. Die Berichterstattung betont regulatorische Herausforderungen beim EU-Markteintritt.`
-    : `${displayBrand} wird in europäischen Quellen deutlich vorsichtiger bewertet. Deutsche Antworten fokussieren auf offene Zertifizierungsfragen, strenge DSGVO-Konformität und den Wettbewerb mit etablierten EU-Marktführern. Die Marktpräsenz wird als noch im Aufbau befindlich eingestuft.`;
+    : `${displayBrand} wird in europäischen Quellen deutlich vorsichtiger bewertet. Deutsche Antworten fokussieren auf offene Zertifizierungsfragen, strenge DSGVO-Konformität und den Wettbewerb mit etablierten EU-Marktführern. Die Marktpräsenz wird als noch im Aufbau befindlich eingestuft.`);
 
   const cleanDomain = displayBrand.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-  const usSources = isDefaultMeridian
-    ? [
-        "reuters.com/business/autos/meridian-ev-sales…",
-        "caranddriver.com/reviews/meridian-lx…",
-        "bloomberg.com/quote/MRDM:US",
-        "consumerreports.org/cars/meridian…",
-        "techcrunch.com/meridian-charging-deal…",
-      ]
-    : [
-        `reuters.com/business/tech/${cleanDomain}-us-market-growth…`,
-        `bloomberg.com/news/articles/${cleanDomain}-expansion…`,
-        `techcrunch.com/2025/${cleanDomain}-product-analysis…`,
-        `forbes.com/sites/innovation/${cleanDomain}-report…`,
-        `wsj.com/articles/${cleanDomain}-quarterly-review…`,
-      ];
+  const usSources = usResult?.citations && usResult.citations.length > 0
+    ? usResult.citations
+    : isDefaultMeridian
+      ? [
+          "reuters.com/business/autos/meridian-ev-sales…",
+          "caranddriver.com/reviews/meridian-lx…",
+          "bloomberg.com/quote/MRDM:US",
+          "consumerreports.org/cars/meridian…",
+          "techcrunch.com/meridian-charging-deal…",
+        ]
+      : [
+          `reuters.com/business/tech/${cleanDomain}-us-market-growth…`,
+          `bloomberg.com/news/articles/${cleanDomain}-expansion…`,
+          `techcrunch.com/2025/${cleanDomain}-product-analysis…`,
+          `forbes.com/sites/innovation/${cleanDomain}-report…`,
+          `wsj.com/articles/${cleanDomain}-quarterly-review…`,
+        ];
 
-  const deSources = isDefaultMeridian
-    ? [
-        "handelsblatt.com/unternehmen/meridian…",
-        "spiegel.de/wirtschaft/meridian-eu-markt…",
-        "adac.de/rund-ums-fahrzeug/tests/meridian…",
-        "manager-magazin.de/autoindustrie…",
-        "de.wikipedia.org/wiki/Meridian_Motors",
-      ]
-    : [
-        `handelsblatt.com/unternehmen/${cleanDomain}-eu-regulierung…`,
-        `spiegel.de/wirtschaft/unternehmen/${cleanDomain}-vergleich…`,
-        `faz.net/finanzen/marktbericht-${cleanDomain}…`,
-        `manager-magazin.de/technologie/${cleanDomain}-markt…`,
-        `golem.de/news/${cleanDomain}-datenschutz-analyse…`,
-      ];
+  const deSources = deResult?.citations && deResult.citations.length > 0
+    ? deResult.citations
+    : isDefaultMeridian
+      ? [
+          "handelsblatt.com/unternehmen/meridian…",
+          "spiegel.de/wirtschaft/meridian-eu-markt…",
+          "adac.de/rund-ums-fahrzeug/tests/meridian…",
+          "manager-magazin.de/autoindustrie…",
+          "de.wikipedia.org/wiki/Meridian_Motors",
+        ]
+      : [
+          `handelsblatt.com/unternehmen/${cleanDomain}-eu-regulierung…`,
+          `spiegel.de/wirtschaft/unternehmen/${cleanDomain}-vergleich…`,
+          `faz.net/finanzen/marktbericht-${cleanDomain}…`,
+          `manager-magazin.de/technologie/${cleanDomain}-markt…`,
+          `golem.de/news/${cleanDomain}-datenschutz-analyse…`,
+        ];
 
   return (
     <>
@@ -243,7 +242,7 @@ export function ResultsDrawer({
                         Visibility
                       </span>
                       <span className="font-mono text-xs text-[#E8E8E8] mt-1 block">
-                        Prominently Cited
+                        {usResult ? (usResult.visibility ? "Prominently Cited" : "Not Mentioned") : "Prominently Cited"}
                       </span>
                     </div>
                   </div>
@@ -301,7 +300,7 @@ export function ResultsDrawer({
                         Visibility
                       </span>
                       <span className="font-mono text-xs text-[#E8E8E8] mt-1 block">
-                        Secondary Mention
+                        {deResult ? (deResult.visibility ? "Secondary Mention" : "Not Mentioned") : "Secondary Mention"}
                       </span>
                     </div>
                   </div>

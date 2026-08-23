@@ -156,6 +156,18 @@ the boundary against `/shared/types.ts` first.
 - **Why not the alternative:** returning `ready` as soon as raw scrape data exists (before analysis finishes) was rejected — it would cause the frontend to render a column with an answer but no sentiment score, an inconsistent half-state.
 - **Chained to:** depends on functions 3 and 4 both completing. Feeds directly into Shreya's function 1 (poll loop). If the frontend polls forever, check here first — a null field in one of the two rows will keep this stuck on `pending` indefinitely.
 
+### 6. Storing `snapshot_id` in `queries` table
+- **Why this logic:** Bright Data's trigger returns a `collection_id` (snapshot ID) that is required to poll the dataset later. Storing it in the DB allows the poll endpoint (`GET /api/results/:id`) to know which snapshot to fetch.
+- **Expected outcome:** The `queries` table contains `snapshot_id` enabling stateless polling.
+- **Why not the alternative:** Keeping it in memory was rejected — it would be lost if the Next.js server restarts or if deployed in a serverless environment.
+- **Chained to:** Feeds into function 2 (polling loop).
+
+### 7. Polling `/dca/dataset` on-demand inside `GET /api/results/:id`
+- **Why this logic:** Instead of a separate `setInterval` background worker, the dataset poll is triggered directly by the frontend's poll request. If data isn't in DB yet, the API route checks Bright Data.
+- **Expected outcome:** No complex background jobs. The API route orchestrates fetching from Bright Data and triggering the LLM synchronously during a poll cycle when data is ready.
+- **Why not the alternative:** A true background worker (cron or setTimeout) was rejected — overkill for MVP and hard to manage in Next.js API routes without external services like Vercel Cron.
+- **Chained to:** Depends on function 1. Feeds into function 3 and 4.
+
 ---
 
 # SHREYA — Frontend logic
