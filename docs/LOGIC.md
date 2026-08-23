@@ -104,6 +104,24 @@ the boundary against `/shared/types.ts` first.
 - **Why not the alternative:** returning raw unstructured text via `console.log` or similar was never viable — Bright Data's trigger/dataset API only surfaces what's passed through `collect()`.
 - **Chained to:** depends on functions 4, 5, and 6 all succeeding. Feeds directly into Kartik's function 1 (batch trigger response parsing). If Kartik's backend gets malformed JSON, check this function's field names against what Kartik's parser expects.
 
+### 8. `evaluate()` for prompt injection instead of `type()`
+- **Why this logic:** Perplexity's search input is a `<div contenteditable>` with `id="ask-input"`, not a standard `<input>` or `<textarea>`. Bright Data's `type(selector, text)` is designed for standard form inputs and doesn't reliably trigger React's state management on contenteditable elements. Using `evaluate()` to set `textContent` directly and dispatch an `input` event ensures Perplexity's JS framework recognises the text and enables the Submit button.
+- **Expected outcome:** the prompt text appears in the input and the Submit button becomes clickable, exactly as if a user had typed it.
+- **Why not the alternative:** `type('#ask-input', prompt)` was the obvious first choice — simpler, one line. Rejected because it silently fails on contenteditable divs: the text may appear visually but React's internal state doesn't update, so the Submit button stays disabled or the submission sends an empty string. This was confirmed by research into Bright Data's own documentation on contenteditable handling.
+- **Chained to:** depends on function 1 (page loaded) and function 2 (input selector exists). Feeds into function 2's submit step. If the prompt is submitted but Perplexity responds with a generic/empty answer, check whether the `input` event dispatch is still being picked up — React may switch to a different synthetic event listener.
+
+### 9. Two-stage wait for answer completion
+- **Why this logic:** function 3 describes waiting for the answer, but the actual implementation uses a two-stage approach: (a) `wait('.prose', { timeout: 60000 })` to confirm the answer has started rendering, then (b) `wait('textarea[placeholder*="Ask follow-up"], textarea[placeholder*="follow"], .mt-sm button[aria-label="Copy"]', { timeout: 45000 })` to confirm it has *finished* streaming. The follow-up textarea and Copy button only appear after Perplexity completes its response.
+- **Expected outcome:** the parser runs only after the full answer is rendered, not mid-stream.
+- **Why not the alternative:** a single `wait('.prose')` (as function 3 generically describes) was insufficient — `.prose` appears as soon as the first token renders, which could be a single word. A fixed `sleep(30s)` was rejected per function 3's rationale. The two-stage approach adapts to actual completion by looking for UI elements that Perplexity itself shows only when generation is done.
+- **Chained to:** refines function 3. If the parser returns truncated text, the second-stage selector may have changed — check whether the follow-up textarea or Copy button still uses these selectors/placeholders, and update accordingly.
+
+### 10. Broad external-link filtering for citations (parser)
+- **Why this logic:** function 5 describes targeting "citation-specific selectors" for extraction. In practice, Perplexity's citation DOM structure is highly dynamic and uses generated class names that change across deployments. Instead of hunting for a fragile citation-specific container, the parser collects *all* `<a href>` tags on the page and filters to external URLs (excluding `perplexity.ai` internal links, auth URLs, `javascript:`, `mailto:`, etc.), then deduplicates via a Set.
+- **Expected outcome:** an array of external URLs representing the sources Perplexity cited in its answer.
+- **Why not the alternative:** function 5's original approach — "targeting citation-specific selectors" — is more precise but much more fragile. Perplexity uses dynamically generated class names (e.g. `_1a2b3c`) that change on every deploy. A broad filter picks up some noise (e.g. footer links to external sites) but never misses a real citation. For the MVP, a few extra URLs in the list is acceptable; missing citations is not.
+- **Chained to:** this is a deliberate divergence from function 5's original design. Feeds into `collect()` (function 7) and downstream into Kartik's citation storage and Shreya's citation list render. If the citation list is *too* noisy (many irrelevant URLs), the next step is to narrow the filter by scoping `$('a[href]')` to the answer thread container rather than the whole page — but start broad for now.
+
 ---
 
 # KARTIK — Backend & orchestration logic
@@ -171,3 +189,27 @@ the boundary against `/shared/types.ts` first.
 - **Expected outcome:** if both `CountryResult` entries are nearly identical, they still render side by side exactly as received — the flat data render doesn't special-case this.
 - **Why not the alternative:** adding a "no significant difference detected" banner was rejected for MVP — it requires a similarity-scoring function that doesn't exist yet (that's a "Later" feature, and possibly the most interesting one if the MVP is extended).
 - **Chained to:** not chained to any specific function — this is a reminder that function 3's render logic shouldn't assume divergence. If someone "fixes" the render to detect and flag identical columns, that's scope creep — flag it against MVP.md before building it.
+
+### 6. Elapsed-timer loading UX (not skeleton screen or spinner)
+- **Why this logic:** the ~90s wait is too long for a spinner (reads as frozen after ~15s) and too unpredictable for a skeleton screen (skeletons imply content is about to appear, misleading at 60s). An elapsed timer (`00:42` format) plus rotating factual status phrases ("Querying Perplexity via US proxy…") gives the user proof that the page is alive without lying about progress.
+- **Expected outcome:** the timer counts up from 00:00, status phrases rotate every ~8s, and a reassurance message ("This typically takes 60–90 seconds") appears after 30s.
+- **Why not the alternative:** (a) A generic spinner was rejected — it reads as broken after 15s of no change. (b) A skeleton/shimmer screen was rejected — skeletons set an expectation of imminent content delivery that a 90s wait violates. (c) A fake stepped progress bar ("Step 1: Scraping… Step 2: Analyzing…") was rejected per existing entry #2 — the backend only reports binary pending/ready, so mapped progress would be dishonest and would require constant re-calibration.
+- **Chained to:** purely presentational, depends on function 1's poll loop. The status phrases describe the pipeline honestly but don't track it — if the real pipeline order changes, update the phrase list, but no logic depends on it.
+
+### 7. Expand/collapse for full AI response (answerText)
+- **Why this logic:** the design brief says long-form `answerText` content must never be clipped. But showing multi-paragraph AI responses at full length in every column pushes the comparison below the fold and buries the side-by-side visual that the design brief calls "the visual hero." Collapsed-by-default with a toggle ("Show full AI response") keeps the comparison compact while making the full text available on demand.
+- **Expected outcome:** `narrativeSummary` is always visible (short, analyst-friendly). `answerText` is collapsed behind a toggle and expands in place when clicked — no separate modal, no page navigation.
+- **Why not the alternative:** (a) Always-visible scroll within a fixed-height card was rejected — the design brief explicitly says "never a fixed-height card that clips content silently." (b) Always-visible full text was rejected — it buries the comparison layout and makes the two columns unequal heights, destroying the side-by-side read. (c) A modal/overlay was rejected — adds interaction cost and loses context of which country you're reading.
+- **Chained to:** depends on `CountryResult.answerText` and `CountryResult.narrativeSummary` being two separate fields. If Kartik's backend ever merges them into one field, this component would need to change its display strategy.
+
+### 8. Mock data fallback for independent frontend development
+- **Why this logic:** Shreya's frontend and Kartik's backend are being built in parallel. Without a mock data mode, the frontend can't be tested at all until `/api/analyze` and `/api/results/:id` exist. A `USE_MOCK = true` flag in `Dashboard.tsx` returns realistic fake data after a short delay, enabling full UI flow testing (idle → loading → ready) without any backend.
+- **Expected outcome:** when `USE_MOCK` is true, submitting any entity name triggers the loading state for ~6s, then renders two pre-written country columns with realistic Tesla data. Flip to `false` when Kartik's routes are live.
+- **Why not the alternative:** (a) MSW (Mock Service Worker) or a test server was rejected — adds a dependency and setup complexity that doesn't justify a 2-endpoint MVP. (b) Hardcoding results without a delay was rejected — it would skip testing the loading state entirely, which is one of the most important UX elements (see entry #6).
+- **Chained to:** the mock data shape must match `/shared/types.ts` exactly. If types change, the mock must be updated or it will silently produce a broken UI. When the real backend is ready, set `USE_MOCK = false` and delete the mock block.
+
+### 9. Entity input — plain text, no autocomplete
+- **Why this logic:** the design brief specifies "a free-text entity input. No validation beyond non-empty." The audience (CMOs, brand leads) knows what brand they want to look up — there's no universe of entities to suggest from, and autocomplete would imply a database of tracked brands that doesn't exist yet.
+- **Expected outcome:** a single text input that accepts any non-empty string and disables while a query is in flight.
+- **Why not the alternative:** autocomplete/typeahead was rejected — there's no entity list to search against, and building one is explicitly out of MVP scope.
+- **Chained to:** feeds into `POST /api/analyze` via Dashboard's `handleSubmit`. If the backend starts rejecting certain entity strings (e.g. too long, special characters), validation should be added here — but for now, pass through whatever the user types.
